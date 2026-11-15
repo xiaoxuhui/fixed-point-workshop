@@ -566,11 +566,15 @@
     setZoom(middleZoom.start * Math.exp(distance * 0.008), false, middleZoom);
   });
 
-  board.addEventListener('lostpointercapture', event => {
+  function endMiddleZoom(event) {
     if (middleZoom?.pointer !== event.pointerId) return;
     middleZoom = null;
     board.classList.remove('zooming');
-  });
+  }
+
+  board.addEventListener('pointerup', endMiddleZoom);
+  board.addEventListener('pointercancel', endMiddleZoom);
+  board.addEventListener('lostpointercapture', endMiddleZoom);
 
   board.addEventListener('auxclick', event => {
     if (event.button === 1) event.preventDefault();
