@@ -37,6 +37,7 @@
         <button class="part" data-part="input" type="button"><span class="part-icon source">↦</span><span><strong>输入</strong><small>IN</small></span><span class="insert" aria-hidden="true">+</span></button>
         <button class="part" data-part="constant" type="button"><span class="part-icon constant">#</span><span><strong>常数</strong><small>CONST</small></span><span class="insert" aria-hidden="true">+</span></button>
         <button class="part" data-part="output" type="button"><span class="part-icon sink">↤</span><span><strong>输出</strong><small>OUT</small></span><span class="insert" aria-hidden="true">+</span></button>
+        <button class="part" data-part="delay" type="button"><span class="part-icon delay">↷</span><span><strong>延迟线</strong><small>1 STEP</small></span><span class="insert" aria-hidden="true">+</span></button>
       </section>
       <div class="format-card">
         <div class="format-title"><strong>定点格式</strong><span>9 BIT</span></div>
@@ -59,6 +60,7 @@
           <p id="level-description"></p>
         </div>
         <div class="toolbar" aria-label="电路操作">
+          <button type="button" id="step" title="让所有延迟线同时采样一次">下一步</button>
           <button type="button" id="undo" title="撤销（Ctrl+Z）" aria-label="撤销">↶</button>
           <button type="button" id="redo" title="重做（Ctrl+Shift+Z）" aria-label="重做">↷</button>
           <button type="button" id="delete" title="删除选中的节点或连线（Delete）" aria-label="删除选中项">×</button>
@@ -102,8 +104,9 @@
     <ol>
       <li>点击元件，把节点放到画布。按住节点顶栏可以移动。屏幕较窄时，可以左右滑动画布。</li>
       <li>点击或拖动右侧输出圆点，接到目标节点左侧的输入圆点。一个输出可以接到多个节点，每个输入只接收一条线。</li>
-      <li>点击导线或节点顶栏选中，再按 Delete 或工具栏的删除按钮。右键点击输入圆点也可以断开导线。</li>
-      <li>从右侧切换样例查看实时结果，点击“检测电路”运行本关全部用例。自由搭建模式下，点击数值可以编辑输入和常数。</li>
+      <li>右键点击元件或导线即可删除，右键点击输入圆点可断开该端口。也可以先选中，再按 Delete。</li>
+      <li>延迟线初始输出 0。每点一次“下一步”，所有延迟线同时采样各自输入，串联时信号每步前进一级。</li>
+      <li>点击输入节点的符号位切换正负，点击数字格切换 0 和 1。也可以点击下方十进制数值直接填写。选中右侧样例可恢复预设输入，点击“检测电路”验证本关全部样例。</li>
     </ol>
     <div class="dialog-rules"><strong>运算规则</strong><p>所有端口使用 1 位符号、4 位整数和 4 位小数，范围为 −15.9375 至 +15.9375。左右移的 N 都必须是非负整数。右移丢弃移出的小数位，运算超出范围时会提示溢出。</p></div>
   </dialog>

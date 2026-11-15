@@ -5,7 +5,7 @@
   const fractionBits = 4;
   const scale = 2 ** fractionBits;
   const max = 2 ** (integerBits + fractionBits) - 1;
-  const ports = Object.freeze({ input: [], constant: [], add: ['A', 'B'], left: ['A', 'N'], right: ['A', 'N'], output: ['IN'] });
+  const ports = Object.freeze({ input: [], constant: [], add: ['A', 'B'], left: ['A', 'N'], right: ['A', 'N'], delay: ['IN'], output: ['IN'] });
 
   function format(ticks) {
     return String(ticks / scale);
@@ -42,7 +42,7 @@
     return result || 0;
   }
 
-  function evaluate(graph, inputs = {}) {
+  function evaluate(graph, inputs = {}, delays = {}) {
     const nodes = new Map(graph.nodes.map(node => [node.id, node]));
     const wires = new Map(graph.wires.map(wire => [`${wire.to}:${wire.port}`, wire.from]));
     const values = new Map();
@@ -56,7 +56,9 @@
       visiting.add(id);
       let value;
       try {
-        if (node.type === 'input' || node.type === 'constant') {
+        if (node.type === 'delay') {
+          value = { ticks: delays[id] ?? 0 };
+        } else if (node.type === 'input' || node.type === 'constant') {
           value = { ticks: node.type === 'input' && Object.hasOwn(inputs, id) ? inputs[id] : node.ticks };
         } else {
           const args = ports[node.type].map(port => {
@@ -78,6 +80,18 @@
     return values;
   }
 
+  function advance(graph, inputs, delays) {
+    const values = evaluate(graph, inputs, delays);
+    const sources = new Map(graph.wires.filter(wire => wire.port === 'IN').map(wire => [wire.to, wire.from]));
+    const next = {};
+    for (const node of graph.nodes) {
+      if (node.type !== 'delay') continue;
+      const source = sources.get(node.id);
+      next[node.id] = source ? (values.get(source)?.ticks ?? delays[node.id] ?? 0) : 0;
+    }
+    return next;
+  }
+
   function connect(graph, from, to, port) {
     const source = graph.nodes.find(node => node.id === from);
     const target = graph.nodes.find(node => node.id === to);
@@ -89,6 +103,7 @@
     const pending = [to];
     while (pending.length) {
       const id = pending.pop();
+      if (graph.nodes.find(node => node.id === id)?.type === 'delay') continue;
       if (id === from) throw new Error('这条线会形成循环连接。');
       if (visited.has(id)) continue;
       visited.add(id);
@@ -98,7 +113,7 @@
     return { ...graph, wires };
   }
 
-  const core = { integerBits, fractionBits, scale, max, ports, format, parse, bits, operate, evaluate, connect };
+  const core = { integerBits, fractionBits, scale, max, ports, format, parse, bits, operate, evaluate, advance, connect };
   if (typeof module === 'object' && module.exports) module.exports = core;
   else root.FixedPoint = core;
 })(globalThis);

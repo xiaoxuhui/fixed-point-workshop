@@ -1,11 +1,11 @@
 (() => {
   'use strict';
 
-  const { parse, format, bits, ports, connect, evaluate } = FixedPoint;
+  const { parse, format, bits, ports, connect, evaluate, advance } = FixedPoint;
   const $ = id => document.getElementById(id);
   const kinds = {
     input: ['输入', '↦', 'A'], constant: ['常数', '#', 'K'], output: ['输出', '↤', 'Y'],
-    add: ['加法', '+', 'ADD'], left: ['左移', '≪', 'SHL'], right: ['右移', '≫', 'SHR'],
+    add: ['加法', '+', 'ADD'], left: ['左移', '≪', 'SHL'], right: ['右移', '≫', 'SHR'], delay: ['延迟线', '↷', 'DLY'],
   };
   const node = (id, type, name, x, y, value = 0) => ({ id, type, name, x, y, ticks: parse(value) });
   const output = () => node('y', 'output', 'Y', 605, 219);
@@ -18,14 +18,14 @@
       wires: [wire('a', 'add', 'A'), wire('add', 'y', 'IN')],
     },
     {
-      title: '向左放大', description: '把 A 左移 N 位。由输入 N 决定每组样例的移位量。', formula: 'Y = A << N',
+      title: '向左放大', description: '将输入 B 接到移位量 N，让 A 左移 B 位。', formula: 'Y = A << B',
       inputs: ['a', 'n'], cases: [[1.25, 1, 2.5], [-0.75, 2, -3], [0.0625, 3, 0.5], [1.125, 0, 1.125]],
-      nodes: [node('a', 'input', 'A', 43, 114), node('n', 'input', 'N', 43, 332), node('left', 'left', 'SHL', 322, 219), output()], wires: [],
+      nodes: [node('a', 'input', 'A', 43, 114), node('n', 'input', 'B', 43, 332), node('left', 'left', 'SHL', 322, 219), output()], wires: [],
     },
     {
-      title: '向右缩小', description: '把 A 右移 N 位，观察最低的小数位移出后，正负数各有什么结果。', formula: 'Y = A >> N',
+      title: '向右缩小', description: '将输入 B 接到移位量 N，让 A 右移 B 位。', formula: 'Y = A >> B',
       inputs: ['a', 'n'], cases: [[5.5, 1, 2.75], [-1.1875, 1, -0.5625], [0.0625, 1, 0], [3.75, 2, 0.9375]],
-      nodes: [node('a', 'input', 'A', 43, 114), node('n', 'input', 'N', 43, 332), node('right', 'right', 'SHR', 322, 219), output()], wires: [],
+      nodes: [node('a', 'input', 'A', 43, 114), node('n', 'input', 'B', 43, 332), node('right', 'right', 'SHR', 322, 219), output()], wires: [],
     },
     {
       title: '两数的平均值', description: '先求 A 和 B 的和，再用常数 1 作为移位量，将和右移一位。', formula: 'Y = (A + B) >> 1',
@@ -38,14 +38,20 @@
   const storageKey = 'fixed-point-workshop-v1';
   const defaultHint = '先选输出圆点，再选输入圆点，即可接线。';
   const svgNS = 'http://www.w3.org/2000/svg';
+  const inputNames = ['A', 'B', 'C', 'D'];
+  const inputY = index => 64 + index * 110;
   let save;
   try { save = JSON.parse(localStorage.getItem(storageKey)) || {}; } catch { save = {}; }
   const boards = save.boards || {};
   const passed = save.passed || {};
+  if (!save.inputPanel) migrateInputs();
   let levelIndex = Number.isInteger(save.levelIndex) && levels[save.levelIndex] ? save.levelIndex : 0;
   let sandbox = save.sandbox === true;
   let graph = boards[boardKey()] || starter();
   let currentCase = 0;
+  let sampleValues = {};
+  let delays = {};
+  let tick = 0;
   let results = null;
   let selection = null;
   let source = null;
@@ -58,18 +64,38 @@
   const redo = [];
 
   function boardKey() { return sandbox ? 'sandbox' : `level-${levelIndex}`; }
+
+  function migrateInputs() {
+    for (const index of [1, 2]) {
+      const input = boards[`level-${index}`]?.nodes.find(item => item.id === 'n');
+      if (input) input.name = 'B';
+    }
+    const board = boards.sandbox;
+    if (!board) return;
+    const inputs = board.nodes.filter(item => item.type === 'input');
+    for (const [index, name] of inputNames.entries()) {
+      if (inputs[index]) {
+        inputs[index].name = name;
+        continue;
+      }
+      const y = inputY(index);
+      const overlaps = board.nodes.some(item => Math.abs(item.y - y) < 104 && Math.abs(item.x - 43) < 174);
+      board.nodes.push(node(`input-${name}`, 'input', name, overlaps ? 236 : 43, y));
+    }
+  }
   function starter() {
     if (!sandbox) {
       const { nodes, wires } = levels[levelIndex];
       return structuredClone({ nodes, wires });
     }
-    return { nodes: [node('a', 'input', 'A', 43, 219, 1.5), output()], wires: [wire('a', 'y', 'IN')] };
+    const inputs = inputNames.map((name, index) => node(name.toLowerCase(), 'input', name, 43, inputY(index), index ? 0 : 1.5));
+    return { nodes: [...inputs, output()], wires: [wire('a', 'y', 'IN')] };
   }
 
   function persist() {
     boards[boardKey()] = graph;
     try {
-      localStorage.setItem(storageKey, JSON.stringify({ boards, passed, levelIndex, sandbox }));
+      localStorage.setItem(storageKey, JSON.stringify({ boards, passed, levelIndex, sandbox, inputPanel: true }));
       $('save-status').textContent = '电路保存在当前浏览器';
     } catch {
       $('save-status').textContent = '当前浏览器无法保存电路';
@@ -115,6 +141,9 @@
     undo.length = 0;
     redo.length = 0;
     currentCase = 0;
+    sampleValues = {};
+    delays = {};
+    tick = 0;
     selection = null;
     finishEdit();
   }
@@ -123,6 +152,27 @@
     if (sandbox) return {};
     const { inputs, cases } = levels[levelIndex];
     return Object.fromEntries(inputs.map((id, i) => [id, parse(cases[index][i])]));
+  }
+
+  function liveInputs() {
+    return { ...caseInputs(currentCase), ...Object.fromEntries(Object.entries(sampleValues).map(([id, value]) => [id, value.ticks])) };
+  }
+
+  function availableInput() {
+    return inputNames.find(name => !graph.nodes.some(item => item.type === 'input' && item.name === name));
+  }
+
+  function inputIsNegative(item, ticks) {
+    return ticks < 0 || (ticks === 0 && Boolean(sandbox ? item.negativeZero : sampleValues[item.id]?.negativeZero));
+  }
+
+  function inputBits(item, ticks) {
+    const [, whole, fraction] = bits(ticks);
+    const minus = inputIsNegative(item, ticks);
+    const cell = (bit, digit, label, pressed = digit === '1') => `<button type="button" class="bit-cell${bit === 'sign' ? ' sign' : ''}" data-bit="${bit}" aria-label="${item.name} ${label}" aria-pressed="${pressed}" title="${label}">${digit}</button>`;
+    const integers = [...whole].map((digit, i) => cell(7 - i, digit, `整数位 ${2 ** (3 - i)}`)).join('');
+    const fractions = [...fraction].map((digit, i) => cell(3 - i, digit, `小数位 ${2 ** (-i - 1)}`)).join('');
+    return `<div class="input-bits" role="group" aria-label="${item.name} 的符号、整数和小数">${cell('sign', minus ? '−' : '+', '符号位', minus)}${integers}<span aria-hidden="true">.</span>${fractions}</div>`;
   }
 
   function bitText(value) {
@@ -148,6 +198,9 @@
     $('redo').disabled = redo.length === 0;
     const item = selection?.kind === 'node' && graph.nodes.find(item => item.id === selection.id);
     $('delete').disabled = !selection || Boolean(item && mandatory(item));
+    const hasDelay = graph.nodes.some(item => item.type === 'delay');
+    $('step').disabled = !hasDelay;
+    $('step').textContent = tick ? `下一步 · ${tick}` : '下一步';
   }
 
   function render() {
@@ -163,11 +216,12 @@
     $('inspector-title').textContent = sandbox ? '信号读数' : '关卡检测';
     $('node-count').textContent = `${graph.nodes.length} 节点 / ${graph.wires.length} 连线`;
     document.querySelectorAll('.shelf [data-part]').forEach(button => {
-      button.disabled = !sandbox && ['input', 'output'].includes(button.dataset.part);
-      button.title = button.disabled ? '关卡的输入和输出由题目指定' : '点击添加到画布';
+      const type = button.dataset.part;
+      button.disabled = (!sandbox && ['input', 'output'].includes(type)) || (type === 'input' && !availableInput());
+      button.title = button.disabled ? (sandbox ? 'A、B、C、D 均已放置' : '关卡的输入和输出由题目指定') : '点击添加到画布';
     });
     updateToolbar();
-    const values = evaluate(graph, caseInputs(currentCase));
+    const values = evaluate(graph, liveInputs(), delays);
     renderNodes(values);
     renderWires(values);
     renderInspector(values);
@@ -178,7 +232,7 @@
       const [label, symbol] = kinds[item.type];
       const value = values.get(item.id);
       const number = value.ticks === undefined ? '—' : format(value.ticks);
-      const editable = item.type === 'constant' || (item.type === 'input' && !mandatory(item));
+      const editable = item.type === 'constant' || item.type === 'input';
       const selected = selection?.kind === 'node' && selection.id === item.id;
       const inlets = ports[item.type];
       const hasOutput = item.type !== 'output';
@@ -189,9 +243,10 @@
       const outlet = hasOutput ? `<button class="port out ${source === item.id ? 'active' : ''} ${graph.wires.some(w => w.from === item.id) ? 'connected' : ''}" type="button" data-out aria-label="${label} ${item.name} 输出口" aria-pressed="${source === item.id}" title="从这里接线"></button>` : '';
       const outletLabel = hasOutput ? '<span>OUT</span>' : '';
       const shownNumber = editable ? `<button type="button" data-edit class="node-number" aria-label="编辑 ${item.name} 的数值">${number}</button>` : `<span class="node-number ${value.error ? 'error' : ''}">${number}</span>`;
+      const body = item.type === 'input' ? `${inputBits(item, value.ticks)}${shownNumber}` : `<div class="node-port-labels"><span>${inlets.map(port => `<span>${port}</span>`).join('')}</span>${outletLabel}</div>${shownNumber}<span class="node-bits" aria-label="定点表示 ${bitText(value)}">${bitText(value)}</span>`;
       return `<article data-node="${item.id}" class="node ${item.type}${selected ? ' selected' : ''}" style="left:${item.x}px;top:${item.y}px">
         <button class="node-head" type="button" aria-label="选择${label} ${item.name}" aria-pressed="${selected}"><span class="node-icon" aria-hidden="true">${symbol}</span><strong>${label}</strong><span class="node-id">${item.name}</span></button>
-        <div class="node-body"><div class="node-port-labels"><span>${inlets.map(port => `<span>${port}</span>`).join('')}</span>${outletLabel}</div>${shownNumber}<span class="node-bits" aria-label="定点表示 ${bitText(value)}">${bitText(value)}</span></div>
+        <div class="node-body">${body}</div>
         ${inletButtons}${outlet}</article>`;
     }).join('');
   }
@@ -211,7 +266,7 @@
     return `M ${a.x},${a.y} C ${a.x + vector},${a.y} ${b.x - vector},${b.y} ${b.x},${b.y}`;
   }
 
-  function renderWires(values = evaluate(graph, caseInputs(currentCase))) {
+  function renderWires(values = evaluate(graph, liveInputs(), delays)) {
     $('wires').innerHTML = graph.wires.map((w, index) => {
       const a = fromPosition(w.from);
       const b = toPosition(w.to, w.port);
@@ -232,7 +287,8 @@
   function challengeReading(values) {
     const value = values.get('y');
     const expected = levels[levelIndex].cases[currentCase].at(-1);
-    return `<div class="reading"><dl><dt>期望 Y</dt><dd>${expected}</dd><dt>实际 Y</dt><dd class="actual">${value?.ticks === undefined ? '—' : format(value.ticks)}</dd></dl>${value?.error ? `<p>${value.error}</p>` : `<p class="node-bits">${bitText(value)}</p>`}</div>`;
+    const customized = Object.keys(sampleValues).length !== 0;
+    return `<div class="reading"><dl><dt>期望 Y</dt><dd>${customized ? '—' : expected}</dd><dt>实际 Y</dt><dd class="actual">${value?.ticks === undefined ? '—' : format(value.ticks)}</dd></dl>${value?.error ? `<p>${value.error}</p>` : `<p class="node-bits">${bitText(value)}</p>`}${customized ? '<p>正在试算自定义值。检测使用预设样例。</p>' : ''}</div>`;
   }
 
   function renderInspector(values) {
@@ -246,11 +302,11 @@
       }).join('') || '<p class="inspection-text">添加输出节点或选择节点，查看信号。</p>'}</section>`;
       return;
     }
-    const { cases, inputs, formula } = levels[levelIndex];
+    const { cases, inputs, formula, nodes } = levels[levelIndex];
     const caseCards = cases.map((values, index) => {
       const badge = results ? (results[index] ? '✓' : '×') : '·';
       const status = results ? (results[index] ? '通过' : '未通过') : '未检测';
-      const sample = inputs.map((id, i) => `${id.toUpperCase()}=${values[i]}`).join(' / ');
+      const sample = inputs.map((id, i) => `${nodes.find(item => item.id === id).name}=${values[i]}`).join(' / ');
       return `<button class="case" type="button" data-case="${index}" aria-pressed="${index === currentCase}" aria-label="样例 ${index + 1}，${sample}，${status}"><span class="case-index">${String(index + 1).padStart(2, '0')}</span><span class="case-values">${sample}</span><span class="case-status ${badge === '×' ? 'fail' : ''}" aria-hidden="true">${badge}</span></button>`;
     }).join('');
     const total = results?.filter(Boolean).length;
@@ -265,6 +321,8 @@
   function addPart(type) {
     if (graph.nodes.length >= 50) return hint('画布最多支持 50 个节点。', true);
     if (!sandbox && ['input', 'output'].includes(type)) return;
+    const inputName = type === 'input' ? availableInput() : null;
+    if (type === 'input' && !inputName) return;
     const base = kinds[type][2];
     let index = 1;
     while (graph.nodes.some(item => item.name === `${base}${index}`)) index += 1;
@@ -272,9 +330,10 @@
       [253, 112], [459, 112], [322, 219], [252, 352], [459, 352], [605, 55], [43, 55],
       [605, 354], [43, 363], [312, 51], [312, 370],
     ];
-    const slot = choices.find(([x, y]) => graph.nodes.every(item => Math.abs(x - item.x) >= 183 || Math.abs(y - item.y) >= 133));
+    if (inputName) choices.unshift([43, inputY(inputNames.indexOf(inputName))]);
+    const slot = choices.find(([x, y]) => graph.nodes.every(item => Math.abs(x - item.x) >= 183 || Math.abs(y - item.y) >= (inputName && item.type === 'input' ? 104 : 133)));
     const [x, y] = slot || [222 + (graph.nodes.length * 51) % 355, 70 + (graph.nodes.length * 47) % 301];
-    const part = node(`part-${crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`}`, type, `${base}${index}`, x, y, type === 'constant' ? 1 : 0);
+    const part = node(`part-${crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`}`, type, inputName || `${base}${index}`, x, y, type === 'constant' ? 1 : 0);
     selection = { kind: 'node', id: part.id };
     commit({ ...graph, nodes: [...graph.nodes, part] }, `已添加${kinds[type][0]} ${part.name}。`);
     $('nodes').querySelector(`[data-node="${part.id}"]`).scrollIntoView({ block: 'nearest', inline: 'nearest' });
@@ -325,10 +384,31 @@
     const item = graph.nodes.find(item => item.id === id);
     editedId = id;
     $('value-title').textContent = `编辑 ${kinds[item.type][0]} ${item.name}`;
-    $('value-input').value = format(item.ticks);
+    $('value-input').value = format(item.type === 'input' && !sandbox ? liveInputs()[id] : item.ticks);
     $('value-error').textContent = '范围 ±15.9375，步长 0.0625';
     $('value-dialog').showModal();
     $('value-input').select();
+  }
+
+  function applyValue(id, ticks, negativeZero = false) {
+    if (!sandbox && Object.hasOwn(caseInputs(currentCase), id)) {
+      sampleValues[id] = { ticks, negativeZero };
+      results = null;
+      render();
+      hint('已更新试算输入。点选样例可恢复预设值。');
+      return;
+    }
+    commit({ ...graph, nodes: graph.nodes.map(item => item.id === id ? { ...item, ticks, negativeZero } : item) }, '已应用新数值。');
+  }
+
+  function toggleInputBit(id, bit) {
+    const item = graph.nodes.find(item => item.id === id);
+    const ticks = sandbox ? item.ticks : liveInputs()[id];
+    const minus = inputIsNegative(item, ticks);
+    const sign = bit === 'sign' ? !minus : minus;
+    const magnitude = bit === 'sign' ? Math.abs(ticks) : Math.abs(ticks) ^ (1 << Number(bit));
+    applyValue(id, sign && magnitude ? -magnitude : magnitude, sign && magnitude === 0);
+    $('nodes').querySelector(`[data-node="${id}"] [data-bit="${bit}"]`).focus({ preventScroll: true });
   }
 
   function fitZoom() {
@@ -359,22 +439,12 @@
     else if (target.hasAttribute('data-in')) {
       if (source) completeWire(source, id, target.dataset.in);
       else hint('先选择要接出的输出圆点。', true);
-    } else if (target.hasAttribute('data-edit')) showEditor(id);
+    } else if (target.hasAttribute('data-bit')) toggleInputBit(id, target.dataset.bit);
+    else if (target.hasAttribute('data-edit')) showEditor(id);
     else if (target.classList.contains('node-head')) {
       select({ kind: 'node', id });
       $('nodes').querySelector(`[data-node="${id}"] .node-head`).focus({ preventScroll: true });
     }
-  });
-
-  $('nodes').addEventListener('contextmenu', event => {
-    const port = event.target.closest('[data-in]');
-    if (!port) return;
-    event.preventDefault();
-    const id = port.closest('[data-node]').dataset.node;
-    const index = graph.wires.findIndex(w => w.to === id && w.port === port.dataset.in);
-    if (index < 0) return;
-    selection = { kind: 'wire', index };
-    removeSelected();
   });
 
   $('nodes').addEventListener('pointerdown', event => {
@@ -404,7 +474,7 @@
       return;
     }
     const x = Math.round(Math.max(16, Math.min(width - 190, drag.base.x + dx)));
-    const y = Math.round(Math.max(47, Math.min(height - 155, drag.base.y + dy)));
+    const y = Math.round(Math.max(47, Math.min(height - drag.element.offsetHeight - 14, drag.base.y + dy)));
     drag.next = { ...drag.base, x, y };
     drag.element.style.left = `${x}px`;
     drag.element.style.top = `${y}px`;
@@ -441,14 +511,33 @@
     else if (event.target === $('plane')) select(null);
   });
 
+  $('plane').addEventListener('contextmenu', event => {
+    const port = event.target.closest('[data-in]');
+    const trace = event.target.closest('[data-wire]');
+    const item = event.target.closest('[data-node]');
+    if (!port && !trace && !item) return;
+    event.preventDefault();
+    if (port || trace) {
+      const index = trace ? Number(trace.dataset.wire) : graph.wires.findIndex(w => w.to === item.dataset.node && w.port === port.dataset.in);
+      if (index < 0) return;
+      selection = { kind: 'wire', index };
+    } else {
+      selection = { kind: 'node', id: item.dataset.node };
+    }
+    removeSelected();
+    updateToolbar();
+  });
+
   $('inspection-content').addEventListener('click', event => {
     const button = event.target.closest('button');
     if (!button) return;
     if (button.hasAttribute('data-case')) {
       currentCase = Number(button.dataset.case);
+      sampleValues = {};
       render();
       document.querySelector(`[data-case="${currentCase}"]`).focus({ preventScroll: true });
     } else if (button.id === 'check') {
+      sampleValues = {};
       const { cases } = levels[levelIndex];
       results = cases.map((values, i) => evaluate(graph, caseInputs(i)).get('y')?.ticks === parse(values.at(-1)));
       const firstFailure = results.indexOf(false);
@@ -474,8 +563,18 @@
   $('undo').addEventListener('click', () => travel(undo, redo, '已撤销。'));
   $('redo').addEventListener('click', () => travel(redo, undo, '已重做。'));
   $('delete').addEventListener('click', removeSelected);
+  $('step').addEventListener('click', () => {
+    delays = advance(graph, liveInputs(), delays);
+    tick += 1;
+    results = null;
+    render();
+    hint(`第 ${tick} 步。所有延迟线已同时采样。`);
+  });
   $('reset').addEventListener('click', () => {
     selection = null;
+    sampleValues = {};
+    delays = {};
+    tick = 0;
     commit(starter(), '已重置电路，可以撤销。');
   });
   $('zoom-out').addEventListener('click', () => setZoom(zoom - 0.15));
@@ -486,9 +585,10 @@
   $('value-form').addEventListener('submit', event => {
     event.preventDefault();
     try {
-      const ticks = parse($('value-input').value);
+      const raw = $('value-input').value.trim();
+      const ticks = parse(raw);
       $('value-dialog').close();
-      commit({ ...graph, nodes: graph.nodes.map(item => item.id === editedId ? { ...item, ticks } : item) }, '已应用新数值。');
+      applyValue(editedId, ticks, ticks === 0 && raw.startsWith('-'));
       $('nodes').querySelector(`[data-node="${editedId}"] [data-edit]`).focus({ preventScroll: true });
     } catch (error) {
       $('value-error').textContent = error.message;
@@ -507,6 +607,7 @@
     } else if (event.key === 'Escape') select(null);
   });
 
+  if (!save.inputPanel) persist();
   render();
   setZoom(fitZoom(), true);
 })();
