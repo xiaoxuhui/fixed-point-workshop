@@ -91,7 +91,7 @@
           </div>
         </div>
         <div class="board-bottom">
-          <span id="board-hint" role="status">先选输出圆点，再选输入圆点，即可接线。</span>
+          <span id="board-hint" role="status">左键拖动节点，滚轮缩放，点击端口接线。</span>
           <div class="zoom" aria-label="画布缩放">
             <button type="button" id="zoom-out" aria-label="缩小">−</button><button type="button" id="zoom-fit" aria-label="适合画布">100%</button><button type="button" id="zoom-in" aria-label="放大">+</button>
           </div>
@@ -110,7 +110,7 @@
   <dialog id="help-dialog" aria-labelledby="help-title">
     <div class="dialog-head"><h2 id="help-title">玩法说明</h2><button type="button" data-close="help-dialog" aria-label="关闭">×</button></div>
     <ol>
-      <li>点击元件，把节点放到画布。按住节点顶栏可以移动。屏幕较窄时，可以左右滑动画布。</li>
+      <li>点击元件将其放到画布，按住左键可拖动节点。滚动滚轮或按住中键上下拖动可缩放画布。</li>
       <li>点击或拖动右侧输出圆点，接到目标节点左侧的输入圆点。一个输出可以接到多个节点，每个输入只接收一条线。</li>
       <li>右键点击元件或导线即可删除，右键点击输入圆点可断开该端口。也可以先选中，再按 Delete。</li>
       <li>延迟线初始输出 0。每点一次“下一步”，所有延迟线同时采样各自输入，串联时信号每步前进一级。</li>

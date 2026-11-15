@@ -38,8 +38,9 @@
   const width = 820;
   const height = 525;
   const storageKey = 'fixed-point-workshop-v1';
-  const defaultHint = '先选输出圆点，再选输入圆点，即可接线。';
+  const defaultHint = '左键拖动节点，滚轮缩放，点击端口接线。';
   const svgNS = 'http://www.w3.org/2000/svg';
+  const board = $('board-scroll');
   const inputNames = ['A', 'B', 'C', 'D'];
   const inputY = index => 64 + index * 110;
   let save;
@@ -60,6 +61,7 @@
   let source = null;
   let drag = null;
   let wireDrag = null;
+  let middleZoom = null;
   let editedId = null;
   let zoom = 1;
   let autoZoom = true;
@@ -437,10 +439,11 @@
   }
 
   function fitZoom() {
-    return Math.min(1, Math.max(0.7, ($('board-scroll').clientWidth - 2) / width));
+    return Math.min(1, Math.max(0.7, (board.clientWidth - 2) / width));
   }
 
-  function setZoom(next, fit = false) {
+  function setZoom(next, fit = false, anchor) {
+    const point = anchor && planePoint(anchor);
     zoom = Math.max(0.7, Math.min(1.6, next));
     autoZoom = fit;
     $('stage').style.width = `${width * zoom}px`;
@@ -449,6 +452,11 @@
     $('zoom-fit').textContent = `${Math.round(zoom * 100)}%`;
     $('zoom-out').disabled = zoom <= 0.7;
     $('zoom-in').disabled = zoom >= 1.6;
+    if (point) {
+      const rect = $('plane').getBoundingClientRect();
+      board.scrollLeft += rect.left + point.x * zoom - anchor.clientX;
+      board.scrollTop += rect.top + point.y * zoom - anchor.clientY;
+    }
   }
 
   function planePoint(event) {
@@ -457,10 +465,12 @@
   }
 
   $('nodes').addEventListener('click', event => {
+    const nodeElement = event.target.closest('[data-node]');
+    if (!nodeElement) return;
+    const id = nodeElement.dataset.node;
     const target = event.target.closest('button');
-    if (!target) return;
-    const id = target.closest('[data-node]').dataset.node;
-    if (target.hasAttribute('data-out')) activateOutlet(id);
+    if (!target) select({ kind: 'node', id });
+    else if (target.hasAttribute('data-out')) activateOutlet(id);
     else if (target.hasAttribute('data-in')) {
       if (source) completeWire(source, id, target.dataset.in);
       else hint('先选择要接出的输出圆点。', true);
@@ -473,8 +483,9 @@
   });
 
   $('nodes').addEventListener('pointerdown', event => {
-    if (event.button !== 0) return;
-    const grip = event.target.closest('.node-head, [data-out]');
+    if (event.button !== 0 || drag || wireDrag || middleZoom) return;
+    const grip = event.target.closest('.node-head, [data-out]')
+      || (!event.target.closest('button') && event.target.closest('.node-body'));
     if (!grip) return;
     const element = grip.closest('[data-node]');
     const id = element.dataset.node;
@@ -530,6 +541,41 @@
 
   $('nodes').addEventListener('pointerup', endPointer);
   $('nodes').addEventListener('pointercancel', endPointer);
+
+  board.addEventListener('wheel', event => {
+    if (!event.deltaY) return;
+    event.preventDefault();
+    if (drag || wireDrag || middleZoom) return;
+    const pixels = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? board.clientHeight : 1);
+    setZoom(zoom * Math.exp(-pixels * 0.0018), false, event);
+  }, { passive: false });
+
+  board.addEventListener('pointerdown', event => {
+    if (event.button !== 1) return;
+    event.preventDefault();
+    if (drag || wireDrag || middleZoom) return;
+    middleZoom = { pointer: event.pointerId, clientX: event.clientX, clientY: event.clientY, start: zoom };
+    board.classList.add('zooming');
+    board.setPointerCapture(event.pointerId);
+  });
+
+  board.addEventListener('pointermove', event => {
+    if (middleZoom?.pointer !== event.pointerId) return;
+    const distance = middleZoom.clientY - event.clientY;
+    if (!distance && zoom === middleZoom.start) return;
+    setZoom(middleZoom.start * Math.exp(distance * 0.008), false, middleZoom);
+  });
+
+  board.addEventListener('lostpointercapture', event => {
+    if (middleZoom?.pointer !== event.pointerId) return;
+    middleZoom = null;
+    board.classList.remove('zooming');
+  });
+
+  board.addEventListener('auxclick', event => {
+    if (event.button === 1) event.preventDefault();
+  });
+
   $('plane').addEventListener('click', event => {
     const trace = event.target.closest('[data-wire]');
     if (trace) select({ kind: 'wire', index: Number(trace.dataset.wire) });
@@ -636,7 +682,7 @@
   $('zoom-out').addEventListener('click', () => setZoom(zoom - 0.15));
   $('zoom-fit').addEventListener('click', () => setZoom(fitZoom(), true));
   $('zoom-in').addEventListener('click', () => setZoom(zoom + 0.15));
-  new ResizeObserver(() => { if (autoZoom) setZoom(fitZoom(), true); }).observe($('board-scroll'));
+  new ResizeObserver(() => { if (autoZoom) setZoom(fitZoom(), true); }).observe(board);
 
   $('value-form').addEventListener('submit', event => {
     event.preventDefault();
