@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="用加法和移位节点搭建有符号定点数电路。">
+  <meta name="theme-color" content="#202d29">
+  <title>定点数工坊</title>
+  <link rel="stylesheet" href="style.css">
+  <script defer src="core.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-icon" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+      <div><h1>定点数工坊</h1><span class="wordmark">FIXED POINT WORKSHOP</span></div>
+    </div>
+    <nav class="mode-switch" aria-label="游戏模式">
+      <button type="button" id="challenge" aria-pressed="true">关卡挑战</button>
+      <button type="button" id="sandbox" aria-pressed="false">自由搭建</button>
+    </nav>
+    <button type="button" class="help" id="help" aria-label="玩法与定点格式"><span aria-hidden="true">?</span> <span>玩法说明</span></button>
+  </header>
+
+  <main class="workshop">
+    <aside class="toolbox" aria-labelledby="toolbox-title">
+      <div class="rail-title"><span class="rail-mark" aria-hidden="true">▦</span><h2 id="toolbox-title">元件库</h2></div>
+      <section class="shelf" aria-labelledby="operations-title">
+        <h3 id="operations-title">运算节点</h3>
+        <button class="part" data-part="add" type="button"><span class="part-icon operator">+</span><span><strong>加法</strong><small>A + B</small></span><span class="insert" aria-hidden="true">+</span></button>
+        <button class="part" data-part="left" type="button"><span class="part-icon operator">≪</span><span><strong>左移</strong><small>A &lt;&lt; N</small></span><span class="insert" aria-hidden="true">+</span></button>
+        <button class="part" data-part="right" type="button"><span class="part-icon operator">≫</span><span><strong>右移</strong><small>A &gt;&gt; N</small></span><span class="insert" aria-hidden="true">+</span></button>
+      </section>
+      <section class="shelf" aria-labelledby="signals-title">
+        <h3 id="signals-title">信号节点</h3>
+        <button class="part" data-part="input" type="button"><span class="part-icon source">↦</span><span><strong>输入</strong><small>IN</small></span><span class="insert" aria-hidden="true">+</span></button>
+        <button class="part" data-part="constant" type="button"><span class="part-icon constant">#</span><span><strong>常数</strong><small>CONST</small></span><span class="insert" aria-hidden="true">+</span></button>
+        <button class="part" data-part="output" type="button"><span class="part-icon sink">↤</span><span><strong>输出</strong><small>OUT</small></span><span class="insert" aria-hidden="true">+</span></button>
+      </section>
+      <div class="format-card">
+        <div class="format-title"><strong>定点格式</strong><span>9 BIT</span></div>
+        <div class="format-sample" aria-label="一位符号，四位整数，四位小数"><b>±</b><b>0000</b><span>.</span><b>0000</b></div>
+        <div class="format-labels"><span>符号</span><span>整数</span><span>小数</span></div>
+        <small>每格精度 0.0625</small>
+      </div>
+    </aside>
+
+    <section class="workspace" aria-labelledby="level-title">
+      <div class="workspace-heading">
+        <div class="lesson">
+          <div class="level-navigation" id="level-navigation">
+            <button type="button" id="prev" aria-label="上一关">‹</button>
+            <label for="levels" class="sr-only">选择关卡</label>
+            <select id="levels"></select>
+            <button type="button" id="next" aria-label="下一关">›</button>
+          </div>
+          <h2 id="level-title"></h2>
+          <p id="level-description"></p>
+        </div>
+        <div class="toolbar" aria-label="电路操作">
+          <button type="button" id="undo" title="撤销（Ctrl+Z）" aria-label="撤销">↶</button>
+          <button type="button" id="redo" title="重做（Ctrl+Shift+Z）" aria-label="重做">↷</button>
+          <button type="button" id="delete" title="删除选中的节点或连线（Delete）" aria-label="删除选中项">×</button>
+          <button type="button" id="reset" class="reset" title="重置电路" aria-label="重置电路">⟳ <span>重置</span></button>
+        </div>
+      </div>
+
+      <div class="board-shell">
+        <div class="board-top">
+          <span><i class="live-dot"></i> 电路画布</span>
+          <span id="node-count"></span>
+        </div>
+        <div class="board-scroll" id="board-scroll" tabindex="0" aria-label="电路画布，可滚动">
+          <div id="stage">
+            <div id="plane">
+              <div class="board-guide" aria-hidden="true"><span>输入</span><span>运算</span><span>输出</span></div>
+              <svg id="wires" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"></svg>
+              <div id="nodes"></div>
+            </div>
+          </div>
+        </div>
+        <div class="board-bottom">
+          <span id="board-hint" role="status">先选输出圆点，再选输入圆点，即可接线。</span>
+          <div class="zoom" aria-label="画布缩放">
+            <button type="button" id="zoom-out" aria-label="缩小">−</button><button type="button" id="zoom-fit" aria-label="适合画布">100%</button><button type="button" id="zoom-in" aria-label="放大">+</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <aside class="inspector" aria-labelledby="inspector-title">
+      <div class="rail-title"><span class="rail-mark" aria-hidden="true">▤</span><h2 id="inspector-title">关卡检测</h2></div>
+      <div id="inspection-content"></div>
+    </aside>
+  </main>
+
+  <footer class="statusbar"><span><i class="live-dot"></i> 电路实时计算</span><span>符号 1 位 <b>·</b> 整数 4 位 <b>·</b> 小数 4 位</span><span id="save-status">电路保存在当前浏览器</span></footer>
+
+  <dialog id="help-dialog" aria-labelledby="help-title">
+    <div class="dialog-head"><h2 id="help-title">玩法说明</h2><button type="button" data-close="help-dialog" aria-label="关闭">×</button></div>
+    <ol>
+      <li>点击元件，把节点放到画布。按住节点顶栏可以移动。屏幕较窄时，可以左右滑动画布。</li>
+      <li>点击或拖动右侧输出圆点，接到目标节点左侧的输入圆点。一个输出可以接到多个节点，每个输入只接收一条线。</li>
+      <li>点击导线或节点顶栏选中，再按 Delete 或工具栏的删除按钮。右键点击输入圆点也可以断开导线。</li>
+      <li>从右侧切换样例查看实时结果，点击“检测电路”运行本关全部用例。自由搭建模式下，点击数值可以编辑输入和常数。</li>
+    </ol>
+    <div class="dialog-rules"><strong>运算规则</strong><p>所有端口使用 1 位符号、4 位整数和 4 位小数，范围为 −15.9375 至 +15.9375。左右移的 N 都必须是非负整数。右移丢弃移出的小数位，运算超出范围时会提示溢出。</p></div>
+  </dialog>
+
+  <dialog id="value-dialog" aria-labelledby="value-title">
+    <form id="value-form">
+      <div class="dialog-head"><h2 id="value-title">编辑数值</h2><button type="button" data-close="value-dialog" aria-label="关闭">×</button></div>
+      <label for="value-input">十进制数值</label>
+      <input id="value-input" type="text" inputmode="decimal" maxlength="40" autocomplete="off" required>
+      <div id="value-error" role="alert">范围 ±15.9375，步长 0.0625</div>
+      <button type="submit" class="primary">应用数值</button>
+    </form>
+  </dialog>
+</body>
+</html>
