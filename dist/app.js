@@ -1,11 +1,13 @@
 (() => {
   'use strict';
 
-  const { parse, format, bits, ports, connect, evaluate, advance } = FixedPoint;
+  const { parse, format, bits, inputPorts, connect, evaluate, advance, hasDelay, captureGate } = FixedPoint;
   const $ = id => document.getElementById(id);
   const kinds = {
     input: ['输入', '↦', 'A'], constant: ['常数', '#', 'K'], output: ['输出', '↤', 'Y'],
-    add: ['加法', '+', 'ADD'], left: ['左移', '≪', 'SHL'], right: ['右移', '≫', 'SHR'], delay: ['延迟线', '↷', 'DLY'],
+    add: ['加法', '+', 'ADD'], sign: ['正负判断', '±', 'SGN'], changeSign: ['改变符号', '×', 'SIGN'],
+    left: ['左移', '≪', 'SHL'], right: ['右移', '≫', 'SHR'], delay: ['延迟线', '↷', 'DLY'],
+    custom: ['逻辑门', '▦', 'G'],
   };
   const node = (id, type, name, x, y, value = 0) => ({ id, type, name, x, y, ticks: parse(value) });
   const output = () => node('y', 'output', 'Y', 605, 219);
@@ -44,6 +46,7 @@
   try { save = JSON.parse(localStorage.getItem(storageKey)) || {}; } catch { save = {}; }
   const boards = save.boards || {};
   const passed = save.passed || {};
+  const gates = Array.isArray(save.gates) ? save.gates : [];
   if (!save.inputPanel) migrateInputs();
   let levelIndex = Number.isInteger(save.levelIndex) && levels[save.levelIndex] ? save.levelIndex : 0;
   let sandbox = save.sandbox === true;
@@ -95,10 +98,12 @@
   function persist() {
     boards[boardKey()] = graph;
     try {
-      localStorage.setItem(storageKey, JSON.stringify({ boards, passed, levelIndex, sandbox, inputPanel: true }));
+      localStorage.setItem(storageKey, JSON.stringify({ boards, passed, gates, levelIndex, sandbox, inputPanel: true }));
       $('save-status').textContent = '电路保存在当前浏览器';
+      return true;
     } catch {
       $('save-status').textContent = '当前浏览器无法保存电路';
+      return false;
     }
   }
 
@@ -184,7 +189,7 @@
   function describesSelection() {
     if (selection?.kind === 'node') {
       const item = graph.nodes.find(item => item.id === selection.id);
-      return item && `${kinds[item.type][0]} ${item.name}`;
+      return item && `${item.gate?.name ?? kinds[item.type][0]} ${item.name}`;
     }
     return selection?.kind === 'wire' ? '导线' : null;
   }
@@ -198,9 +203,10 @@
     $('redo').disabled = redo.length === 0;
     const item = selection?.kind === 'node' && graph.nodes.find(item => item.id === selection.id);
     $('delete').disabled = !selection || Boolean(item && mandatory(item));
-    const hasDelay = graph.nodes.some(item => item.type === 'delay');
-    $('step').disabled = !hasDelay;
+    $('step').disabled = !hasDelay(graph);
     $('step').textContent = tick ? `下一步 · ${tick}` : '下一步';
+    $('save-gate').hidden = !sandbox;
+    $('save-gate').disabled = !graph.nodes.some(item => item.type === 'output');
   }
 
   function render() {
@@ -218,9 +224,13 @@
     document.querySelectorAll('.shelf [data-part]').forEach(button => {
       const type = button.dataset.part;
       button.disabled = (!sandbox && ['input', 'output'].includes(type)) || (type === 'input' && !availableInput());
-      button.title = button.disabled ? (sandbox ? 'A、B、C、D 均已放置' : '关卡的输入和输出由题目指定') : '点击添加到画布';
+      if (button.disabled) button.title = sandbox ? 'A、B、C、D 均已放置' : '关卡的输入和输出由题目指定';
+      else if (type === 'sign') button.title = '负数输出 −1，零输出 0，正数输出 +1';
+      else if (type === 'changeSign') button.title = 'S 接 −1 取反，接 0 归零，接 +1 保留原值';
+      else button.title = '点击添加到画布';
     });
     updateToolbar();
+    renderLibrary();
     const values = evaluate(graph, liveInputs(), delays);
     renderNodes(values);
     renderWires(values);
@@ -229,23 +239,24 @@
 
   function renderNodes(values) {
     $('nodes').innerHTML = graph.nodes.map(item => {
-      const [label, symbol] = kinds[item.type];
+      const [kind, symbol] = kinds[item.type];
+      const label = escapeHTML(item.gate?.name ?? kind);
       const value = values.get(item.id);
       const number = value.ticks === undefined ? '—' : format(value.ticks);
       const editable = item.type === 'constant' || item.type === 'input';
       const selected = selection?.kind === 'node' && selection.id === item.id;
-      const inlets = ports[item.type];
+      const inlets = inputPorts(item);
       const hasOutput = item.type !== 'output';
       const inletButtons = inlets.map((port, index) => {
         const connected = graph.wires.some(w => w.to === item.id && w.port === port);
-        return `<button class="port in ${index === 1 ? 'second' : ''} ${connected ? 'connected' : ''} ${source && item.id !== source ? 'waiting' : ''}" type="button" data-in="${port}" aria-label="${label} ${item.name} 输入口 ${port}" title="输入 ${port}${connected ? '，右键断开' : ''}"></button>`;
+        return `<button class="port in ${connected ? 'connected' : ''} ${source && item.id !== source ? 'waiting' : ''}" style="--port-top:${44 + index * 23}px" type="button" data-in="${port}" aria-label="${label} ${item.name} 输入口 ${port}" title="输入 ${port}${connected ? '，右键断开' : ''}"></button>`;
       }).join('');
       const outlet = hasOutput ? `<button class="port out ${source === item.id ? 'active' : ''} ${graph.wires.some(w => w.from === item.id) ? 'connected' : ''}" type="button" data-out aria-label="${label} ${item.name} 输出口" aria-pressed="${source === item.id}" title="从这里接线"></button>` : '';
       const outletLabel = hasOutput ? '<span>OUT</span>' : '';
       const shownNumber = editable ? `<button type="button" data-edit class="node-number" aria-label="编辑 ${item.name} 的数值">${number}</button>` : `<span class="node-number ${value.error ? 'error' : ''}">${number}</span>`;
       const body = item.type === 'input' ? `${inputBits(item, value.ticks)}${shownNumber}` : `<div class="node-port-labels"><span>${inlets.map(port => `<span>${port}</span>`).join('')}</span>${outletLabel}</div>${shownNumber}<span class="node-bits" aria-label="定点表示 ${bitText(value)}">${bitText(value)}</span>`;
       return `<article data-node="${item.id}" class="node ${item.type}${selected ? ' selected' : ''}" style="left:${item.x}px;top:${item.y}px">
-        <button class="node-head" type="button" aria-label="选择${label} ${item.name}" aria-pressed="${selected}"><span class="node-icon" aria-hidden="true">${symbol}</span><strong>${label}</strong><span class="node-id">${item.name}</span></button>
+        <button class="node-head" type="button" aria-label="选择${label} ${item.name}" title="${label}" aria-pressed="${selected}"><span class="node-icon" aria-hidden="true">${symbol}</span><strong>${label}</strong><span class="node-id">${item.name}</span></button>
         <div class="node-body">${body}</div>
         ${inletButtons}${outlet}</article>`;
     }).join('');
@@ -258,7 +269,7 @@
 
   function toPosition(id, port) {
     const item = graph.nodes.find(item => item.id === id);
-    return item && { x: item.x, y: item.y + 56.5 + ports[item.type].indexOf(port) * 23 };
+    return item && { x: item.x, y: item.y + 56.5 + inputPorts(item).indexOf(port) * 23 };
   }
 
   function curve(a, b) {
@@ -318,7 +329,20 @@
       <section class="inspection-section actions"><button class="primary" type="button" id="check">▶ 检测电路</button>${results ? `<p class="check-result${total === cases.length ? '' : ' fail'}" role="status">${message}</p>` : ''}</section>`;
   }
 
-  function addPart(type) {
+  function escapeHTML(text) {
+    return text.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
+  }
+
+  function renderLibrary() {
+    $('gate-library').innerHTML = gates.map((gate, index) => {
+      const name = escapeHTML(gate.name);
+      const ports = gate.inputs.map(input => input.name).join(' · ') || '无输入';
+      return `<button class="part" type="button" data-gate="${index}" title="添加 ${name}"><span class="part-icon custom">▦</span><span><strong>${name}</strong><small>${ports} → OUT</small></span><span class="insert" aria-hidden="true">+</span></button>`;
+    }).join('');
+    $('gate-empty').hidden = gates.length > 0;
+  }
+
+  function addPart(type, gate) {
     if (graph.nodes.length >= 50) return hint('画布最多支持 50 个节点。', true);
     if (!sandbox && ['input', 'output'].includes(type)) return;
     const inputName = type === 'input' ? availableInput() : null;
@@ -334,8 +358,9 @@
     const slot = choices.find(([x, y]) => graph.nodes.every(item => Math.abs(x - item.x) >= 183 || Math.abs(y - item.y) >= (inputName && item.type === 'input' ? 104 : 133)));
     const [x, y] = slot || [222 + (graph.nodes.length * 51) % 355, 70 + (graph.nodes.length * 47) % 301];
     const part = node(`part-${crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`}`, type, inputName || `${base}${index}`, x, y, type === 'constant' ? 1 : 0);
+    if (gate) part.gate = gate;
     selection = { kind: 'node', id: part.id };
-    commit({ ...graph, nodes: [...graph.nodes, part] }, `已添加${kinds[type][0]} ${part.name}。`);
+    commit({ ...graph, nodes: [...graph.nodes, part] }, `已添加${gate?.name ?? kinds[type][0]} ${part.name}。`);
     $('nodes').querySelector(`[data-node="${part.id}"]`).scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }
 
@@ -563,6 +588,37 @@
   $('undo').addEventListener('click', () => travel(undo, redo, '已撤销。'));
   $('redo').addEventListener('click', () => travel(redo, undo, '已重做。'));
   $('delete').addEventListener('click', removeSelected);
+  $('gate-library').addEventListener('click', event => {
+    const button = event.target.closest('[data-gate]');
+    if (button) addPart('custom', gates[Number(button.dataset.gate)]);
+  });
+  $('save-gate').addEventListener('click', () => {
+    const outputs = graph.nodes.filter(item => item.type === 'output');
+    const options = outputs.map(item => new Option(item.name, item.id));
+    $('gate-output').replaceChildren(...options);
+    if (selection?.kind === 'node' && outputs.some(item => item.id === selection.id)) $('gate-output').value = selection.id;
+    $('gate-name').value = '';
+    $('gate-error').textContent = '';
+    $('gate-dialog').showModal();
+  });
+  $('gate-form').addEventListener('submit', event => {
+    event.preventDefault();
+    const name = $('gate-name').value.trim();
+    try {
+      if (!name) throw new Error('请输入逻辑门名称。');
+      const gate = captureGate(graph, $('gate-output').value, name);
+      gates.unshift(gate);
+      if (!persist()) {
+        gates.shift();
+        throw new Error('浏览器存储不可用，逻辑门未保存。');
+      }
+      $('gate-dialog').close();
+      renderLibrary();
+      hint(`已保存「${name}」，可从元件库添加。`);
+    } catch (error) {
+      $('gate-error').textContent = error.message;
+    }
+  });
   $('step').addEventListener('click', () => {
     delays = advance(graph, liveInputs(), delays);
     tick += 1;

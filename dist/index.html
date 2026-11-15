@@ -31,6 +31,8 @@
         <button class="part" data-part="add" type="button"><span class="part-icon operator">+</span><span><strong>加法</strong><small>A + B</small></span><span class="insert" aria-hidden="true">+</span></button>
         <button class="part" data-part="left" type="button"><span class="part-icon operator">≪</span><span><strong>左移</strong><small>A &lt;&lt; N</small></span><span class="insert" aria-hidden="true">+</span></button>
         <button class="part" data-part="right" type="button"><span class="part-icon operator">≫</span><span><strong>右移</strong><small>A &gt;&gt; N</small></span><span class="insert" aria-hidden="true">+</span></button>
+        <button class="part" data-part="sign" type="button" title="负数输出 −1，零输出 0，正数输出 +1"><span class="part-icon operator">±</span><span><strong>正负判断</strong><small>sign(A)</small></span><span class="insert" aria-hidden="true">+</span></button>
+        <button class="part" data-part="changeSign" type="button"><span class="part-icon operator">×</span><span><strong>改变符号</strong><small>A × S</small></span><span class="insert" aria-hidden="true">+</span></button>
       </section>
       <section class="shelf" aria-labelledby="signals-title">
         <h3 id="signals-title">信号节点</h3>
@@ -38,6 +40,11 @@
         <button class="part" data-part="constant" type="button"><span class="part-icon constant">#</span><span><strong>常数</strong><small>CONST</small></span><span class="insert" aria-hidden="true">+</span></button>
         <button class="part" data-part="output" type="button"><span class="part-icon sink">↤</span><span><strong>输出</strong><small>OUT</small></span><span class="insert" aria-hidden="true">+</span></button>
         <button class="part" data-part="delay" type="button"><span class="part-icon delay">↷</span><span><strong>延迟线</strong><small>1 STEP</small></span><span class="insert" aria-hidden="true">+</span></button>
+      </section>
+      <section class="shelf" aria-labelledby="gates-title">
+        <h3 id="gates-title">我的逻辑门</h3>
+        <p id="gate-empty">在自由搭建中保存电路。</p>
+        <div id="gate-library"></div>
       </section>
       <div class="format-card">
         <div class="format-title"><strong>定点格式</strong><span>9 BIT</span></div>
@@ -60,6 +67,7 @@
           <p id="level-description"></p>
         </div>
         <div class="toolbar" aria-label="电路操作">
+          <button type="button" id="save-gate" title="将输出上游的电路封装成逻辑门" hidden>保存为逻辑门</button>
           <button type="button" id="step" title="让所有延迟线同时采样一次">下一步</button>
           <button type="button" id="undo" title="撤销（Ctrl+Z）" aria-label="撤销">↶</button>
           <button type="button" id="redo" title="重做（Ctrl+Shift+Z）" aria-label="重做">↷</button>
@@ -106,9 +114,10 @@
       <li>点击或拖动右侧输出圆点，接到目标节点左侧的输入圆点。一个输出可以接到多个节点，每个输入只接收一条线。</li>
       <li>右键点击元件或导线即可删除，右键点击输入圆点可断开该端口。也可以先选中，再按 Delete。</li>
       <li>延迟线初始输出 0。每点一次“下一步”，所有延迟线同时采样各自输入，串联时信号每步前进一级。</li>
+      <li>在自由搭建中点击“保存为逻辑门”，选择一个输出并命名。这个输出用到的输入会变成新门的端口，可以从元件库再次放到画布。</li>
       <li>点击输入节点的符号位切换正负，点击数字格切换 0 和 1。也可以点击下方十进制数值直接填写。选中右侧样例可恢复预设输入，点击“检测电路”验证本关全部样例。</li>
     </ol>
-    <div class="dialog-rules"><strong>运算规则</strong><p>所有端口使用 1 位符号、4 位整数和 4 位小数，范围为 −15.9375 至 +15.9375。左右移的 N 都必须是非负整数。右移丢弃移出的小数位，运算超出范围时会提示溢出。</p></div>
+    <div class="dialog-rules"><strong>运算规则</strong><p>所有端口使用 1 位符号、4 位整数和 4 位小数，范围为 −15.9375 至 +15.9375。左右移的 N 都必须是非负整数。右移丢弃移出的小数位，运算超出范围时会提示溢出。</p><p>正负判断对负数、零和正数分别输出 −1、0 和 +1。将该结果接到「改变符号」的 S 端，A 接待处理的数值。</p></div>
   </dialog>
 
   <dialog id="value-dialog" aria-labelledby="value-title">
@@ -118,6 +127,17 @@
       <input id="value-input" type="text" inputmode="decimal" maxlength="40" autocomplete="off" required>
       <div id="value-error" role="alert">范围 ±15.9375，步长 0.0625</div>
       <button type="submit" class="primary">应用数值</button>
+    </form>
+  </dialog>
+  <dialog id="gate-dialog" aria-labelledby="gate-title">
+    <form id="gate-form">
+      <div class="dialog-head"><h2 id="gate-title">保存为逻辑门</h2><button type="button" data-close="gate-dialog" aria-label="关闭">×</button></div>
+      <label for="gate-name">逻辑门名称</label>
+      <input id="gate-name" type="text" maxlength="24" autocomplete="off" required autofocus>
+      <label for="gate-output">要封装的输出</label>
+      <select id="gate-output" required></select>
+      <p id="gate-error" role="alert"></p>
+      <button type="submit" class="primary">保存逻辑门</button>
     </form>
   </dialog>
 </body>
