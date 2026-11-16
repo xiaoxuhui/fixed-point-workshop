@@ -38,7 +38,7 @@
   const width = 820;
   const height = 525;
   const storageKey = 'fixed-point-workshop-v1';
-  const defaultHint = '左键拖动节点，滚轮缩放，点击端口接线。';
+  const defaultHint = '左键拖节点，右键拖空白处移动视角，滚轮缩放。';
   const svgNS = 'http://www.w3.org/2000/svg';
   const board = $('board-scroll');
   const inputNames = ['A', 'B', 'C', 'D'];
@@ -65,6 +65,9 @@
   let editedId = null;
   let zoom = 1;
   let autoZoom = true;
+  let cameraX = 0;
+  let cameraY = 0;
+  let pan = null;
   const undo = [];
   const redo = [];
 
@@ -345,25 +348,41 @@
   }
 
   function addPart(type, gate) {
-    if (graph.nodes.length >= 50) return hint('画布最多支持 50 个节点。', true);
     if (!sandbox && ['input', 'output'].includes(type)) return;
     const inputName = type === 'input' ? availableInput() : null;
     if (type === 'input' && !inputName) return;
     const base = kinds[type][2];
     let index = 1;
     while (graph.nodes.some(item => item.name === `${base}${index}`)) index += 1;
-    const choices = [
-      [253, 112], [459, 112], [322, 219], [252, 352], [459, 352], [605, 55], [43, 55],
-      [605, 354], [43, 363], [312, 51], [312, 370],
-    ];
-    if (inputName) choices.unshift([43, inputY(inputNames.indexOf(inputName))]);
-    const slot = choices.find(([x, y]) => graph.nodes.every(item => Math.abs(x - item.x) >= 183 || Math.abs(y - item.y) >= (inputName && item.type === 'input' ? 104 : 133)));
-    const [x, y] = slot || [222 + (graph.nodes.length * 51) % 355, 70 + (graph.nodes.length * 47) % 301];
+    const cardHeight = type === 'input' ? 104 : 155 + Math.max(0, (gate?.inputs.length ?? 0) - 2) * 23;
+    const { x, y } = placement(cardHeight);
     const part = node(`part-${crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`}`, type, inputName || `${base}${index}`, x, y, type === 'constant' ? 1 : 0);
     if (gate) part.gate = gate;
     selection = { kind: 'node', id: part.id };
     commit({ ...graph, nodes: [...graph.nodes, part] }, `已添加${gate?.name ?? kinds[type][0]} ${part.name}。`);
-    $('nodes').querySelector(`[data-node="${part.id}"]`).scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    if (cameraX + x * zoom < 0 || cameraX + (x + 174) * zoom > board.clientWidth || cameraY + y * zoom < 0 || cameraY + (y + cardHeight) * zoom > board.clientHeight) {
+      autoZoom = false;
+      cameraX = board.clientWidth / 2 - (x + 87) * zoom;
+      cameraY = board.clientHeight / 2 - (y + cardHeight / 2) * zoom;
+      drawCamera();
+    }
+  }
+
+  function placement(cardHeight) {
+    const centerX = Math.round((board.clientWidth / 2 - cameraX) / zoom - 87);
+    const centerY = Math.round((board.clientHeight / 2 - cameraY) / zoom - cardHeight / 2);
+    const heights = new Map([...$('nodes').children].map(element => [element.dataset.node, element.offsetHeight]));
+    for (let ring = 0; ; ring += 1) {
+      for (let row = -ring; row <= ring; row += 1) {
+        for (let column = -ring; column <= ring; column += 1) {
+          if (Math.max(Math.abs(row), Math.abs(column)) !== ring) continue;
+          const x = centerX + column * 196;
+          const y = centerY + row * (cardHeight + 18);
+          const available = graph.nodes.every(item => x + 191 <= item.x || item.x + 191 <= x || y + cardHeight + 12 <= item.y || item.y + (heights.get(item.id) ?? 155) + 12 <= y);
+          if (available) return { x, y };
+        }
+      }
+    }
   }
 
   function select(next) {
@@ -438,25 +457,46 @@
     $('nodes').querySelector(`[data-node="${id}"] [data-bit="${bit}"]`).focus({ preventScroll: true });
   }
 
-  function fitZoom() {
-    return Math.min(1, Math.max(0.7, (board.clientWidth - 2) / width));
+  function drawCamera() {
+    $('plane').style.transform = `translate(${cameraX}px, ${cameraY}px) scale(${zoom})`;
+    board.style.backgroundPosition = `${cameraX}px ${cameraY}px`;
+  }
+
+  function viewportCenter() {
+    const rect = board.getBoundingClientRect();
+    return { clientX: rect.left + board.clientWidth / 2, clientY: rect.top + board.clientHeight / 2 };
+  }
+
+  function fitCamera() {
+    const frame = { x: 0, y: 0, right: width, bottom: height };
+    const positions = new Map(graph.nodes.map(node => [node.id, node]));
+    for (const element of $('nodes').children) {
+      const node = positions.get(element.dataset.node);
+      frame.x = Math.min(frame.x, node.x - 12);
+      frame.y = Math.min(frame.y, node.y - 12);
+      frame.right = Math.max(frame.right, node.x + element.offsetWidth + 12);
+      frame.bottom = Math.max(frame.bottom, node.y + element.offsetHeight + 12);
+    }
+    const next = Math.min(1, (board.clientWidth - 18) / (frame.right - frame.x), (board.clientHeight - 18) / (frame.bottom - frame.y));
+    setZoom(next, frame);
   }
 
   function setZoom(next, fit = false, anchor) {
     const point = anchor && planePoint(anchor);
-    zoom = Math.max(0.7, Math.min(1.6, next));
-    autoZoom = fit;
-    $('stage').style.width = `${width * zoom}px`;
-    $('stage').style.height = `${height * zoom}px`;
-    $('plane').style.transform = `scale(${zoom})`;
-    $('zoom-fit').textContent = `${Math.round(zoom * 100)}%`;
-    $('zoom-out').disabled = zoom <= 0.7;
-    $('zoom-in').disabled = zoom >= 1.6;
-    if (point) {
-      const rect = $('plane').getBoundingClientRect();
-      board.scrollLeft += rect.left + point.x * zoom - anchor.clientX;
-      board.scrollTop += rect.top + point.y * zoom - anchor.clientY;
+    zoom = Math.max(fit ? Number.EPSILON : Math.min(0.25, zoom), Math.min(1.6, next));
+    autoZoom = Boolean(fit);
+    if (fit) {
+      cameraX = (board.clientWidth - (fit.right - fit.x) * zoom) / 2 - fit.x * zoom;
+      cameraY = (board.clientHeight - (fit.bottom - fit.y) * zoom) / 2 - fit.y * zoom;
+    } else if (point) {
+      const rect = board.getBoundingClientRect();
+      cameraX = anchor.clientX - rect.left - point.x * zoom;
+      cameraY = anchor.clientY - rect.top - point.y * zoom;
     }
+    drawCamera();
+    $('zoom-fit').textContent = `${zoom < 0.1 ? Number((zoom * 100).toPrecision(2)) : Math.round(zoom * 100)}%`;
+    $('zoom-out').disabled = zoom <= 0.25;
+    $('zoom-in').disabled = zoom >= 1.6;
   }
 
   function planePoint(event) {
@@ -483,7 +523,7 @@
   });
 
   $('nodes').addEventListener('pointerdown', event => {
-    if (event.button !== 0 || drag || wireDrag || middleZoom) return;
+    if (event.button !== 0 || drag || wireDrag || middleZoom || pan) return;
     const grip = event.target.closest('.node-head, [data-out]')
       || (!event.target.closest('button') && event.target.closest('.node-body'));
     if (!grip) return;
@@ -509,8 +549,8 @@
       renderWires();
       return;
     }
-    const x = Math.round(Math.max(16, Math.min(width - 190, drag.base.x + dx)));
-    const y = Math.round(Math.max(47, Math.min(height - drag.element.offsetHeight - 14, drag.base.y + dy)));
+    const x = Math.round(drag.base.x + dx);
+    const y = Math.round(drag.base.y + dy);
     drag.next = { ...drag.base, x, y };
     drag.element.style.left = `${x}px`;
     drag.element.style.top = `${y}px`;
@@ -545,21 +585,36 @@
   board.addEventListener('wheel', event => {
     if (!event.deltaY) return;
     event.preventDefault();
-    if (drag || wireDrag || middleZoom) return;
+    if (drag || wireDrag || middleZoom || pan) return;
     const pixels = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? board.clientHeight : 1);
     setZoom(zoom * Math.exp(-pixels * 0.0018), false, event);
   }, { passive: false });
 
   board.addEventListener('pointerdown', event => {
+    const blank = !event.target.closest('[data-node], [data-wire]');
+    if (blank && (event.button === 2 || event.pointerType === 'touch') && !drag && !wireDrag && !middleZoom && !pan) {
+      event.preventDefault();
+      autoZoom = false;
+      pan = { pointer: event.pointerId, x: event.clientX - cameraX, y: event.clientY - cameraY };
+      board.classList.add('panning');
+      board.setPointerCapture(event.pointerId);
+      return;
+    }
     if (event.button !== 1) return;
     event.preventDefault();
-    if (drag || wireDrag || middleZoom) return;
+    if (drag || wireDrag || middleZoom || pan) return;
     middleZoom = { pointer: event.pointerId, clientX: event.clientX, clientY: event.clientY, start: zoom };
     board.classList.add('zooming');
     board.setPointerCapture(event.pointerId);
   });
 
   board.addEventListener('pointermove', event => {
+    if (pan?.pointer === event.pointerId) {
+      cameraX = event.clientX - pan.x;
+      cameraY = event.clientY - pan.y;
+      drawCamera();
+      return;
+    }
     if (middleZoom?.pointer !== event.pointerId) return;
     const distance = middleZoom.clientY - event.clientY;
     if (!distance && zoom === middleZoom.start) return;
@@ -567,6 +622,10 @@
   });
 
   function endMiddleZoom(event) {
+    if (pan?.pointer === event.pointerId) {
+      pan = null;
+      board.classList.remove('panning');
+    }
     if (middleZoom?.pointer !== event.pointerId) return;
     middleZoom = null;
     board.classList.remove('zooming');
@@ -579,6 +638,7 @@
   board.addEventListener('auxclick', event => {
     if (event.button === 1) event.preventDefault();
   });
+  board.addEventListener('contextmenu', event => event.preventDefault());
 
   $('plane').addEventListener('click', event => {
     const trace = event.target.closest('[data-wire]');
@@ -683,10 +743,10 @@
     tick = 0;
     commit(starter(), '已重置电路，可以撤销。');
   });
-  $('zoom-out').addEventListener('click', () => setZoom(zoom - 0.15));
-  $('zoom-fit').addEventListener('click', () => setZoom(fitZoom(), true));
-  $('zoom-in').addEventListener('click', () => setZoom(zoom + 0.15));
-  new ResizeObserver(() => { if (autoZoom) setZoom(fitZoom(), true); }).observe(board);
+  $('zoom-out').addEventListener('click', () => setZoom(zoom - 0.15, false, viewportCenter()));
+  $('zoom-fit').addEventListener('click', fitCamera);
+  $('zoom-in').addEventListener('click', () => setZoom(zoom + 0.15, false, viewportCenter()));
+  new ResizeObserver(() => { if (autoZoom) fitCamera(); }).observe(board);
 
   $('value-form').addEventListener('submit', event => {
     event.preventDefault();
@@ -715,5 +775,5 @@
 
   if (!save.inputPanel) persist();
   render();
-  setZoom(fitZoom(), true);
+  fitCamera();
 })();
