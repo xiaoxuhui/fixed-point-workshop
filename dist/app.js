@@ -169,7 +169,12 @@
   }
 
   function availableInput() {
-    return inputNames.find(name => !graph.nodes.some(item => item.type === 'input' && item.name === name));
+    const used = new Set(graph.nodes.filter(item => item.type === 'input').map(item => item.name));
+    for (let index = 1; ; index += 1) {
+      let name = '';
+      for (let value = index; value > 0; value = Math.floor((value - 1) / 26)) name = String.fromCharCode(65 + (value - 1) % 26) + name;
+      if (!used.has(name)) return name;
+    }
   }
 
   function inputIsNegative(item, ticks) {
@@ -228,11 +233,11 @@
     $('node-count').textContent = `${graph.nodes.length} 节点 / ${graph.wires.length} 连线`;
     document.querySelectorAll('.shelf [data-part]').forEach(button => {
       const type = button.dataset.part;
-      button.disabled = (!sandbox && ['input', 'output'].includes(type)) || (type === 'input' && !availableInput());
-      if (button.disabled) button.title = sandbox ? 'A、B、C、D 均已放置' : '关卡的输入和输出由题目指定';
+      button.disabled = !sandbox && ['input', 'output'].includes(type);
+      if (button.disabled) button.title = '关卡的输入和输出由题目指定';
       else if (type === 'sign') button.title = '负数输出 −1，零输出 0，正数输出 +1';
       else if (type === 'changeSign') button.title = 'S 接 −1 取反，接 0 归零，接 +1 保留原值';
-      else button.title = '点击添加到画布';
+      else button.title = '点击添加，或拖到画布指定位置';
     });
     updateToolbar();
     renderLibrary();
@@ -347,7 +352,7 @@
     $('gate-empty').hidden = gates.length > 0;
   }
 
-  function addPart(type, gate) {
+  function addPart(type, gate, position) {
     if (!sandbox && ['input', 'output'].includes(type)) return;
     const inputName = type === 'input' ? availableInput() : null;
     if (type === 'input' && !inputName) return;
@@ -355,7 +360,7 @@
     let index = 1;
     while (graph.nodes.some(item => item.name === `${base}${index}`)) index += 1;
     const cardHeight = type === 'input' ? 104 : 155 + Math.max(0, (gate?.inputs.length ?? 0) - 2) * 23;
-    const { x, y } = placement(cardHeight);
+    const { x, y } = position ?? placement(cardHeight);
     const part = node(`part-${crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`}`, type, inputName || `${base}${index}`, x, y, type === 'constant' ? 1 : 0);
     if (gate) part.gate = gate;
     selection = { kind: 'node', id: part.id };
@@ -688,6 +693,56 @@
   });
 
   document.querySelectorAll('[data-part]').forEach(button => button.addEventListener('click', () => addPart(button.dataset.part)));
+  const toolbox = document.querySelector('.toolbox');
+  let partDrag = null;
+  let suppressPartClick = false;
+  toolbox.addEventListener('pointerdown', event => {
+    const button = event.target.closest('[data-part], [data-gate]');
+    if (event.button !== 0 || !button || button.disabled || drag || wireDrag || pan || middleZoom) return;
+    event.preventDefault();
+    partDrag = { button, pointer: event.pointerId, x: event.clientX, y: event.clientY, ghost: null };
+    toolbox.setPointerCapture(event.pointerId);
+  });
+  document.addEventListener('pointermove', event => {
+    if (partDrag?.pointer !== event.pointerId) return;
+    if (!partDrag.ghost && Math.hypot(event.clientX - partDrag.x, event.clientY - partDrag.y) < 6) return;
+    if (!partDrag.ghost) {
+      const ghost = partDrag.button.cloneNode(true);
+      ghost.classList.add('part-ghost');
+      ghost.removeAttribute('id');
+      ghost.setAttribute('aria-hidden', 'true');
+      ghost.tabIndex = -1;
+      document.body.append(ghost);
+      partDrag.ghost = ghost;
+    }
+    partDrag.ghost.style.left = `${event.clientX + 12}px`;
+    partDrag.ghost.style.top = `${event.clientY + 12}px`;
+    board.classList.toggle('drop-target', board.contains(document.elementFromPoint(event.clientX, event.clientY)));
+  });
+  function finishPartDrag(event) {
+    if (partDrag?.pointer !== event.pointerId) return;
+    const active = partDrag;
+    partDrag = null;
+    board.classList.remove('drop-target');
+    if (!active.ghost) return;
+    active.ghost.remove();
+    suppressPartClick = true;
+    setTimeout(() => { suppressPartClick = false; }, 0);
+    if (event.type !== 'pointerup' || !board.contains(document.elementFromPoint(event.clientX, event.clientY))) return;
+    const point = planePoint(event);
+    const position = { x: Math.round(point.x - 87), y: Math.round(point.y - 19) };
+    const gate = active.button.hasAttribute('data-gate') ? gates[Number(active.button.dataset.gate)] : undefined;
+    addPart(active.button.dataset.part || 'custom', gate, position);
+  }
+  document.addEventListener('pointerup', finishPartDrag);
+  document.addEventListener('pointercancel', finishPartDrag);
+  toolbox.addEventListener('lostpointercapture', finishPartDrag);
+  toolbox.addEventListener('click', event => {
+    if (suppressPartClick) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+  }, true);
   document.querySelectorAll('[data-close]').forEach(button => button.addEventListener('click', () => $(button.dataset.close).close()));
   $('help').addEventListener('click', () => $('help-dialog').showModal());
   $('challenge').addEventListener('click', () => switchBoard(false));
